@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { BookOpen, Send, Brain, Layers, Target, ChevronRight, X, Mic, Volume2, User, RotateCcw } from 'lucide-react';
+import { BookOpen, Send, Brain, Layers, Target, ChevronRight, X, Mic, MicOff, Volume2, VolumeX, User, RotateCcw, Square, Headphones } from 'lucide-react';
 import api from '../api/axios';
 import ChatMessage from '../components/app/ChatMessage';
 import TeacherAvatar from '../components/app/TeacherAvatar';
+import LiveTeacher from '../components/app/LiveTeacher';
 import Button from '../components/ui/Button';
 import { useToast } from '../components/ui/Toast';
 
@@ -39,6 +40,10 @@ export default function Learn() {
   const [soundEnabled, setSoundEnabled] = useState(false);
   const [avatarSpeaking, setAvatarSpeaking] = useState(false);
   const [avatarEmotion, setAvatarEmotion] = useState('idle');
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [liveMode, setLiveMode] = useState(false);
+  const recognitionRef = useRef(null);
 
   const [showQuiz, setShowQuiz] = useState(false);
   const [quiz, setQuiz] = useState(null);
@@ -54,7 +59,6 @@ export default function Learn() {
   const messagesEndRef = useRef(null);
   const { addToast } = useToast();
 
-  // Restore session from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('learn_session');
     if (saved) {
@@ -70,12 +74,9 @@ export default function Learn() {
     }
   }, []);
 
-  // Save session on change
   useEffect(() => {
     if (sessionId) {
-      localStorage.setItem('learn_session', JSON.stringify({
-        sessionId, sessionInfo, progress, topic, subject, level,
-      }));
+      localStorage.setItem('learn_session', JSON.stringify({ sessionId, sessionInfo, progress, topic, subject, level }));
     }
   }, [sessionId, progress, sessionInfo]);
 
@@ -84,27 +85,58 @@ export default function Learn() {
   const speakText = (text) => {
     if (!soundEnabled) return;
     const synth = window.speechSynthesis;
-    synth.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = language;
     utterance.rate = 0.9;
-    utterance.onstart = () => { setAvatarSpeaking(true); setAvatarEmotion('speaking'); };
-    utterance.onend = () => { setAvatarSpeaking(false); setAvatarEmotion('idle'); };
+    utterance.onstart = () => { setIsSpeaking(true); setAvatarSpeaking(true); setAvatarEmotion('speaking'); };
+    utterance.onend = () => { setIsSpeaking(false); setAvatarSpeaking(false); setAvatarEmotion('idle'); };
+    utterance.onerror = () => { setIsSpeaking(false); setAvatarSpeaking(false); setAvatarEmotion('idle'); };
     synth.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    window.speechSynthesis.cancel();
+    setIsSpeaking(false);
+    setAvatarSpeaking(false);
+    setAvatarEmotion('idle');
   };
 
   const startListening = () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { addToast('Speech not supported', 'error'); return; }
+    if (!SpeechRecognition) { addToast('Speech recognition not supported', 'error'); return; }
+
+    const langMap = { en: 'en-US', fr: 'fr-FR', sw: 'sw-KE' };
     const recognition = new SpeechRecognition();
-    recognition.lang = language;
+    recognition.lang = langMap[language] || 'en-US';
     recognition.continuous = false;
-    recognition.onresult = (e) => { setMessage(e.results[0][0].transcript); addToast('Heard!', 'success'); };
-    recognition.onerror = () => addToast('Could not hear you', 'error');
-    recognition.start();
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setIsListening(true);
+    recognition.onresult = (e) => {
+      const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+      if (e.results[0].isFinal) setMessage(prev => prev + (prev ? ' ' : '') + transcript);
+    };
+    recognition.onerror = (e) => {
+      setIsListening(false);
+      switch (e.error) {
+        case 'not-allowed': addToast('Microphone access denied', 'error'); break;
+        case 'no-speech': addToast('No speech detected', 'info'); break;
+        case 'network': addToast('Network error', 'error'); break;
+        default: addToast('Could not hear you', 'error');
+      }
+    };
+    recognition.onend = () => setIsListening(false);
+    recognitionRef.current = recognition;
+    try { recognition.start(); } catch { setIsListening(false); addToast('Microphone error', 'error'); }
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) { recognitionRef.current.abort(); setIsListening(false); }
   };
 
   const newSession = () => {
+    stopSpeaking(); stopListening();
     localStorage.removeItem('learn_session');
     setSessionId(null); setSessionInfo(null); setMessages([]);
     setProgress(0); setTopic(''); setSubject('general'); setLevel('beginner');
@@ -120,9 +152,7 @@ export default function Learn() {
     const msg = message;
     setMessage('');
     try {
-      const { data } = await api.post('/general/learn', {
-        topic: topic || 'General', subject, level, message: msg, session_id: sessionId,
-      });
+      const { data } = await api.post('/general/learn', { topic: topic || 'General', subject, level, message: msg, session_id: sessionId });
       const reply = data.data.reply;
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
       setSessionId(data.data.session_id);
@@ -152,18 +182,14 @@ export default function Learn() {
     if (answerResult) return;
     setSelectedAnswer(idx);
     try {
-      const { data } = await api.post('/general/learn/quiz/submit', {
-        session_id: sessionId, question_index: currentQuestion, answer_index: idx,
-        quiz_data: quiz.questions, session_data: { correct_answers: answerResult?.is_correct ? 1 : 0 },
-      });
+      const { data } = await api.post('/general/learn/quiz/submit', { session_id: sessionId, question_index: currentQuestion, answer_index: idx, quiz_data: quiz.questions, session_data: { correct_answers: answerResult?.is_correct ? 1 : 0 } });
       setAnswerResult(data.data);
     } catch { addToast('Failed', 'error'); }
   };
 
   const nextQuestion = () => {
-    if (currentQuestion < (quiz?.questions?.length || 0) - 1) {
-      setCurrentQuestion(p => p + 1); setSelectedAnswer(null); setAnswerResult(null);
-    } else { setShowQuiz(false); addToast('Quiz complete!', 'success'); }
+    if (currentQuestion < (quiz?.questions?.length || 0) - 1) { setCurrentQuestion(p => p + 1); setSelectedAnswer(null); setAnswerResult(null); }
+    else { setShowQuiz(false); addToast('Quiz complete!', 'success'); }
   };
 
   const generateFlashcards = async () => {
@@ -175,25 +201,18 @@ export default function Learn() {
   };
 
   const nextFlashcard = () => {
-    if (flashcardIndex < (flashcards?.flashcards?.length || 0) - 1) {
-      setFlashcardIndex(p => p + 1); setShowAnswer(false);
-    } else { setShowFlashcards(false); addToast('All reviewed!', 'success'); }
+    if (flashcardIndex < (flashcards?.flashcards?.length || 0) - 1) { setFlashcardIndex(p => p + 1); setShowAnswer(false); }
+    else { setShowFlashcards(false); addToast('All reviewed!', 'success'); }
   };
 
   return (
     <div className="h-full flex">
-      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
         <div className="flex-shrink-0 border-b border-border px-6 py-4">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-                <BookOpen size={20} className="text-primary" /> Learning Studio
-              </h1>
-              {sessionInfo && (
-                <p className="text-sm text-text-secondary mt-0.5">{sessionInfo.topic} • {sessionInfo.subject} • {sessionInfo.level}</p>
-              )}
+              <h1 className="text-lg font-semibold text-text-primary flex items-center gap-2"><BookOpen size={20} className="text-primary" /> Learning Studio</h1>
+              {sessionInfo && <p className="text-sm text-text-secondary mt-0.5">{sessionInfo.topic} • {sessionInfo.subject} • {sessionInfo.level}</p>}
             </div>
             <div className="flex items-center gap-2">
               <Button size="sm" variant="secondary" onClick={generateQuiz}><Brain size={15} className="mr-1" /> Quiz</Button>
@@ -201,52 +220,51 @@ export default function Learn() {
             </div>
           </div>
 
-          {/* Toggles row */}
           <div className="flex items-center gap-3 mt-3 flex-wrap">
+            <button onClick={() => setLiveMode(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-black hover:bg-primary-hover transition-colors">
+              <Headphones size={14} /> Live Teacher
+            </button>
+
             <button onClick={() => setShowAvatar(!showAvatar)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                showAvatar ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border border-transparent'
-              }`}>
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${showAvatar ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border border-transparent'}`}>
               <User size={14} /> {showAvatar ? 'Mr HDM ON' : 'Mr HDM'}
             </button>
 
-            <button onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                soundEnabled ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border border-transparent'
-              }`}>
+            <button onClick={() => { setSoundEnabled(!soundEnabled); if (soundEnabled) stopSpeaking(); }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${soundEnabled ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-bg-tertiary text-text-secondary hover:text-text-primary border border-transparent'}`}>
               <Volume2 size={14} /> {soundEnabled ? 'Sound ON' : 'Sound'}
             </button>
+
+            {isSpeaking && (
+              <button onClick={stopSpeaking} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-danger/20 text-danger border border-danger/30">
+                <Square size={14} /> Stop
+              </button>
+            )}
 
             <div className="flex items-center gap-1 bg-bg-tertiary rounded-lg p-1">
               {LANGUAGES.map(l => (
                 <button key={l.code} onClick={() => setLanguage(l.code)}
-                  className={`px-2 py-1 rounded text-xs transition-colors ${
-                    language === l.code ? 'bg-primary text-black' : 'text-text-secondary hover:text-text-primary'
-                  }`} title={l.label}>
+                  className={`px-2 py-1 rounded text-xs transition-colors ${language === l.code ? 'bg-primary text-black' : 'text-text-secondary hover:text-text-primary'}`} title={l.label}>
                   {l.flag} <span className="hidden sm:inline">{l.label}</span>
                 </button>
               ))}
             </div>
 
             {sessionId && (
-              <button onClick={newSession}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-primary hover:bg-bg-tertiary transition-colors">
+              <button onClick={newSession} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-primary hover:bg-bg-tertiary transition-colors">
                 <RotateCcw size={14} /> New Topic
               </button>
             )}
           </div>
 
-          {/* Session config */}
           {!sessionId && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-              <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="What to learn?"
-                className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary" />
-              <select value={subject} onChange={e => setSubject(e.target.value)}
-                className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-secondary outline-none focus:border-primary">
+              <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="What to learn?" className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary" />
+              <select value={subject} onChange={e => setSubject(e.target.value)} className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-secondary outline-none focus:border-primary">
                 {SUBJECTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               </select>
-              <select value={level} onChange={e => setLevel(e.target.value)}
-                className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-secondary outline-none focus:border-primary">
+              <select value={level} onChange={e => setLevel(e.target.value)} className="bg-bg-tertiary border border-border rounded-lg px-3 py-2 text-sm text-text-secondary outline-none focus:border-primary">
                 {LEVELS.map(l => <option key={l} value={l}>{l.charAt(0).toUpperCase() + l.slice(1)}</option>)}
               </select>
             </div>
@@ -254,37 +272,34 @@ export default function Learn() {
 
           {progress > 0 && (
             <div className="mt-3">
-              <div className="flex justify-between text-xs text-text-muted mb-1.5">
-                <span>Progress</span><span className="text-primary font-medium">{progress.toFixed(0)}%</span>
-              </div>
-              <div className="h-1.5 bg-bg-tertiary rounded-full overflow-hidden">
-                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${progress}%` }} />
-              </div>
+              <div className="flex justify-between text-xs text-text-muted mb-1.5"><span>Progress</span><span className="text-primary font-medium">{progress.toFixed(0)}%</span></div>
+              <div className="h-1.5 bg-bg-tertiary rounded-full overflow-hidden"><div className="h-full bg-primary rounded-full transition-all" style={{ width: `${progress}%` }} /></div>
             </div>
           )}
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {messages.length === 0 && (
             <div className="h-[40vh] flex items-center justify-center text-center">
               <div>
                 <Target size={48} className="text-text-muted mx-auto mb-4 opacity-30" />
                 <h2 className="text-lg font-semibold text-text-primary mb-2">Start Learning</h2>
-                <p className="text-text-muted text-sm">Choose a topic, set your level, and ask a question.</p>
-                {localStorage.getItem('learn_session') && (
-                  <p className="text-text-muted text-xs mt-2">You have a saved session. Start typing to continue.</p>
-                )}
+                <p className="text-text-muted text-sm">Choose a topic, set your level, ask a question, or start Live Teacher mode.</p>
+                {localStorage.getItem('learn_session') && <p className="text-text-muted text-xs mt-2">You have a saved session. Start typing to continue.</p>}
               </div>
             </div>
           )}
           {messages.map((m, i) => (
             <div key={i}>
               <ChatMessage role={m.role} content={m.content} />
-              {m.role === 'assistant' && soundEnabled && (
-                <button onClick={() => speakText(m.content)} className="ml-11 mt-1 p-1 text-text-muted hover:text-primary rounded">
-                  <Volume2 size={14} />
-                </button>
+              {m.role === 'assistant' && (
+                <div className="ml-11 mt-1 flex gap-1">
+                  {!isSpeaking ? (
+                    <button onClick={() => speakText(m.content)} className="p-1 text-text-muted hover:text-primary rounded" title="Read aloud"><Volume2 size={14} /></button>
+                  ) : (
+                    <button onClick={stopSpeaking} className="p-1 text-text-muted hover:text-danger rounded" title="Stop"><VolumeX size={14} /></button>
+                  )}
+                </div>
               )}
             </div>
           ))}
@@ -298,21 +313,20 @@ export default function Learn() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
         <div className="flex-shrink-0 border-t border-border px-6 py-4">
           <form onSubmit={startSession} className="flex gap-2">
-            <button type="button" onClick={startListening}
-              className="p-2.5 text-text-secondary hover:text-primary bg-bg-tertiary border border-border rounded-xl transition-colors" title="Voice input">
-              <Mic size={18} />
-            </button>
+            {!isListening ? (
+              <button type="button" onClick={startListening} className="p-2.5 rounded-xl text-text-secondary hover:text-primary bg-bg-tertiary border border-border transition-colors" title="Start listening"><Mic size={18} /></button>
+            ) : (
+              <button type="button" onClick={stopListening} className="p-2.5 rounded-xl bg-danger text-white animate-pulse transition-colors" title="Stop listening"><MicOff size={18} /></button>
+            )}
             <input value={message} onChange={e => setMessage(e.target.value)}
-              placeholder={sessionId ? "Ask a follow-up..." : "Ask your first question..."}
+              placeholder={isListening ? 'Listening...' : sessionId ? "Ask a follow-up..." : "Ask your first question..."}
               className="flex-1 bg-bg-tertiary border border-border rounded-xl px-4 py-2.5 text-text-primary placeholder-text-muted text-sm focus:outline-none focus:border-primary" disabled={loading} />
             <Button type="submit" size="sm" loading={loading} disabled={!message.trim()}><Send size={18} /></Button>
           </form>
         </div>
 
-        {/* Quiz Modal */}
         {showQuiz && quiz && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-bg-secondary border border-border rounded-xl w-full max-w-lg p-6 shadow-2xl">
@@ -342,7 +356,6 @@ export default function Learn() {
           </div>
         )}
 
-        {/* Flashcards Modal */}
         {showFlashcards && flashcards && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-bg-secondary border border-border rounded-xl w-full max-w-md p-6 shadow-2xl">
@@ -367,11 +380,14 @@ export default function Learn() {
         )}
       </div>
 
-      {/* Avatar side panel */}
       {showAvatar && (
         <div className="w-48 lg:w-56 border-l border-border bg-bg-secondary flex-shrink-0 hidden sm:block">
           <TeacherAvatar speaking={avatarSpeaking} emotion={avatarEmotion} />
         </div>
+      )}
+
+      {liveMode && (
+        <LiveTeacher language={language} topic={topic} onClose={() => setLiveMode(false)} />
       )}
     </div>
   );
