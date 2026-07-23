@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import Spinner from '../ui/Spinner';
+import { Menu } from 'lucide-react';
 
 export default function AppLayout() {
   const { user, loading } = useAuth();
@@ -32,7 +33,14 @@ export default function AppLayout() {
 
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <Header onMenuClick={() => setMobileOpen(true)} />
+        {/* Header with hamburger */}
+        <div className="shrink-0 flex items-center h-14 bg-bg-secondary border-b border-border px-4 lg:px-6">
+          <button onClick={() => setMobileOpen(true)} className="lg:hidden p-2 mr-3 text-text-secondary hover:text-text-primary hover:bg-bg-tertiary rounded-lg">
+            <Menu size={20} />
+          </button>
+          <Header />
+        </div>
+        {/* Scrollable content */}
         <main className="flex-1 overflow-y-auto">
           <Outlet />
         </main>

@@ -1,46 +1,19 @@
-import { useState } from 'react';
-import { Outlet, Navigate } from 'react-router-dom';
+import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
-import Sidebar from './Sidebar';
-import Header from './Header';
-import Spinner from '../ui/Spinner';
+import { Sun, Moon } from 'lucide-react';
 
-export default function AppLayout() {
-  const { user, loading } = useAuth();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
-
-  if (loading) return <div className="h-screen flex items-center justify-center bg-bg"><Spinner size="lg" /></div>;
-  if (!user) return <Navigate to="/login" />;
+export default function Header() {
+  const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
 
   return (
-    <div className="h-screen flex overflow-hidden bg-bg">
-      {/* Desktop sidebar */}
-      <div className="hidden lg:block shrink-0">
-        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(!collapsed)} />
-      </div>
-
-      {/* Mobile sidebar overlay */}
-      {mobileOpen && (
-        <>
-          <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setMobileOpen(false)} />
-          <div className="fixed inset-y-0 left-0 z-50 w-64 lg:hidden">
-            <Sidebar collapsed={false} onMobileClose={() => setMobileOpen(false)} />
-          </div>
-        </>
-      )}
-
-      {/* Main area */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Static header */}
-        <div className="shrink-0">
-          <Header onMenuClick={() => setMobileOpen(true)} />
-        </div>
-        {/* Scrollable content */}
-        <main className="flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
-      </div>
-    </div>
+    <header className="flex-1 flex items-center justify-between">
+      <span className="text-sm text-text-secondary">
+        Welcome, <span className="text-text-primary">{user?.username || user?.email || 'User'}</span>
+      </span>
+      <button onClick={toggleTheme} className="p-2 rounded-lg text-text-secondary hover:text-text-primary hover:bg-bg-tertiary transition-colors">
+        {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      </button>
+    </header>
   );
 }
