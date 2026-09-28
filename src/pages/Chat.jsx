@@ -50,7 +50,7 @@ export default function Chat() {
       }
 
       const token = localStorage.getItem('token');
-      const res = await fetch(`${BASE_URL}/api/v1/chat/general`, {
+      const res = await fetch(`${BASE_URL}/api/v1/chat`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData,

@@ -28,7 +28,7 @@ export default function Keys() {
   const handleCreate = async () => {
     setCreating(true);
     try {
-      const { data } = await api.post('/keys/outbound', { project: 'general', name: newName || 'My Key' });
+      const { data } = await api.post('/keys/outbound', { project: 'chat', name: newName || 'My Key' });
       setNewKey(data.data.fullKey);
       fetchKeys();
       addToast('Key created!', 'success');
@@ -97,7 +97,7 @@ export default function Keys() {
         ) : (
           <div className="space-y-4">
             <Input label="Key Name" value={newName} onChange={e => setNewName(e.target.value)} placeholder="My App" />
-            <p className="text-xs text-text-muted">Only General AI keys are available.</p>
+            <p className="text-xs text-text-muted">Only Chat keys are available.</p>
             <div className="flex gap-2">
               <Button size="sm" onClick={handleCreate} loading={creating}>Create</Button>
               <Button size="sm" variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>

@@ -81,7 +81,7 @@ export default function Settings() {
   const handleCreateKey = async () => {
     setCreating(true);
     try {
-      const { data } = await api.post('/keys/outbound', { project: 'general', name: newKeyName || 'My Key' });
+      const { data } = await api.post('/keys/outbound', { project: 'chat', name: newKeyName || 'My Key' });
       setNewKeyFull(data.data.fullKey);
       loadOutbound();
       addToast('Key created!', 'success');
@@ -240,7 +240,7 @@ export default function Settings() {
                   <Card className="mb-4">
                     <h3 className="text-sm font-medium text-text-primary mb-3">New Outbound Key</h3>
                     <Input value={newKeyName} onChange={e => setNewKeyName(e.target.value)} placeholder="Key name (e.g., My App)" className="mb-3" />
-                    <p className="text-xs text-text-muted mb-3">Only General AI keys are available.</p>
+                    <p className="text-xs text-text-muted mb-3">Only Chat keys are available.</p>
                     <div className="flex gap-2">
                       <Button size="sm" onClick={handleCreateKey} loading={creating}>Create</Button>
                       <Button size="sm" variant="secondary" onClick={() => setShowCreateKey(false)}>Cancel</Button>
